@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if echo \"$CLAUDE_TOOL_INPUT\" | grep -q 'machine.yaml'; then kcad build --project . >/dev/null 2>&1 && kcad check --project . --quiet; fi"
+          }
+        ]
+      }
+    ]
+  }
+}

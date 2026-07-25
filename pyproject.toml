@@ -1,0 +1,16 @@
+[project]
+name = "kinematic-cad"
+version = "0.1.0"
+description = "Parametric, invariant-checked assembly toolkit for USD / Isaac Sim"
+requires-python = ">=3.10"
+dependencies = ["pyyaml>=6.0", "numpy>=1.24"]
+
+[project.scripts]
+kcad = "kcad.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["kcad*"]

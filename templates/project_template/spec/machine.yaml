@@ -1,0 +1,126 @@
+# Спека машины — ЕДИНСТВЕННЫЙ источник истины проекта.
+# Правки идут сюда. Сцена никогда не редактируется руками: она пересобирается.
+name: my_machine
+up_axis: Z            # Z-up, метры — дефолт USD/Isaac. Меняйте осознанно.
+forward_axis: "+X"    # направление основного движения машины
+meters_per_unit: 1.0
+
+# --------------------------------------------------------------- параметры
+# Всё, что вы захотите однажды поменять. Никаких чисел в коде сборки.
+params:
+  base_height: 0.750
+  table_x: 1.200
+  table_y: 0.800
+  arm_reach: 0.600
+  travel: 0.400
+  actuator_time: 0.120
+  cycle_distance: 0.900
+  cycle_speed: 0.500
+
+# ------------------------------------------------------- производные величины
+# Выражения на params. Меняете один параметр — пересчитывается всё зависимое.
+derived:
+  table_top: "base_height"
+  arm_height: "table_top + 0.300"
+  cycle_t: "cycle_distance / cycle_speed"
+
+# ------------------------------------------------------------------- фреймы
+# ЕДИНСТВЕННОЕ место, где решаются оси и позы. Всё наследуется от base.
+frames:
+  base:
+    parent: null
+    translate: [0, 0, 0]
+    note: "начало машины; +X — рабочее направление, +Z — вверх"
+  table:
+    parent: base
+    translate: [0, 0, "=table_top"]
+    note: "рабочая плоскость"
+  arm_mount:
+    parent: base
+    translate: [0, 0, "=arm_height"]
+    note: "точка крепления подвижного узла"
+
+# ------------------------------------------------------------------- детали
+parts:
+  floor:
+    frame: base
+    kind: plane
+    size: {x: 6.0, y: 6.0}
+    physics: static
+    tags: [environment]
+
+  table_top:
+    frame: table
+    kind: box
+    size: {x: "=table_x", y: "=table_y", z: 0.040}
+    offset: [0, 0, -0.020]
+    physics: static
+    tags: [structure]
+
+  slider:
+    frame: arm_mount
+    kind: box
+    size: {x: 0.200, y: 0.120, z: 0.080}
+    physics: rigid
+    mass: 2.0
+    tags: [moving]
+
+# ------------------------------------------------------------------ джойнты
+# Ось ВСЕГДА в системе родительской детали. Больше нигде ось не пересчитывается.
+joints:
+  slider_drive:
+    kind: prismatic
+    parent: table_top
+    child: slider
+    axis: [1, 0, 0]
+    limits: ["=-travel", "=travel"]
+    drive: {target_position: 0.0, stiffness: 2000.0, damping: 200.0, max_force: 500.0}
+
+# ---------------------------------------------------------------- инварианты
+# Замысел конструкции в машинном виде. Падает — чините spec, а не проверку.
+constraints:
+  - kind: height
+    name: "рабочая плоскость на проектной высоте"
+    frame: table
+    min: "=base_height - 0.001"
+    max: "=base_height + 0.001"
+
+  - kind: joint_axis_direction
+    name: "привод ходит вдоль машины"
+    joint: slider_drive
+    expect: forward
+    tol_deg: 0.5
+    allow_flip: true
+
+  - kind: no_interpenetration
+    name: "в стартовой позе ничего не пересекается"
+    ignore_pairs:
+      - [floor, table_top]
+
+  - kind: inside_workspace
+    name: "всё внутри рабочей зоны"
+    bounds:
+      min: [-2.0, -2.0, -0.1]
+      max: [2.0, 2.0, 2.0]
+    tags: [structure, moving]
+
+  - kind: cycle_time
+    name: "такт укладывается в норматив"
+    distance: "=cycle_distance"
+    speed: "=cycle_speed"
+    max_time: 2.5
+
+  - kind: actuator_window
+    name: "привод успевает отработать за такт"
+    available_time: "=cycle_t"
+    actuator_time: "=actuator_time"
+    margin: 1.5
+
+# --------------------------------------------------------------- runtime-граф
+# Отдельный от сборки. Ветвление и петли — данными, а не порядком файлов.
+runtime:
+  entry: spawn_item
+  nodes: [spawn_item, assign_id, record]
+  transitions:
+    - {from: spawn_item, to: assign_id}
+    - {from: assign_id, to: record}

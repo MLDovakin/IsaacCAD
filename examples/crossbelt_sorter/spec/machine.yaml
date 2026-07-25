@@ -1,0 +1,326 @@
+# Пример проекта: кроссбелт-сортер с тремя зонами выгрузки.
+# Ядро kcad про конвейеры не знает ничего — вся специфика живёт здесь.
+name: crossbelt_sorter
+up_axis: Z
+forward_axis: "+X"
+meters_per_unit: 1.0
+
+# ---------------------------------------------------------------- параметры
+# ЕДИНСТВЕННЫЙ источник истины. Правки идут сюда, а не в код сборки и не в стейдж.
+params:
+  infeed_height: 0.700          # м, фиксировано условиями площадки
+  sorter_infeed_height: 0.700   # м, фиксировано
+  cage_rim_height: 0.800        # м, борт ролл-кейджа
+  cage_len: 1.200
+  cage_width: 0.800
+  deck_clearance: 0.100         # запас от деки каретки до борта кейджа
+  ramp_run: 2.000               # длина участка подъёма
+  belt_speed: 1.000             # м/с
+  carrier_count: 20
+  max_item: 0.500               # макс. габарит товара
+  wall_height: 0.120            # борт каретки
+  wall_thickness: 0.020
+  carrier_len: 0.640
+  carrier_width: 0.560
+  loop_length_x: 8.000
+  loop_width_y: 3.000
+  eject_gap: 0.150              # зазор от края деки до борта кейджа
+  eject_margin: 0.050
+  actuator_time: 0.150          # время срабатывания привода поперечной ленты
+  item_friction: 0.400
+  worst_item_base: 0.100        # худший товар: узкий и высокий
+  worst_item_height: 0.500
+
+# ------------------------------------------------------ производные величины
+# Ни одного магического числа в геометрии: всё считается из params.
+derived:
+  deck_height: "cage_rim_height + deck_clearance"          # 0.900
+  rise: "deck_height - infeed_height"                      # 0.200
+  ramp_angle: "atan2(rise, ramp_run)"                      # ~5.71 deg
+  carrier_pitch: "loop_perimeter / carrier_count"
+  loop_perimeter: "2 * (loop_length_x + loop_width_y)"
+  min_pitch: "max_item + 2 * wall_thickness + 0.060"
+  drop_to_rim: "deck_height - cage_rim_height"             # 0.100
+  t_to_rim: "sqrt(2 * drop_to_rim / g)"
+  eject_speed: "(eject_gap + eject_margin) / t_to_rim"
+  drop_to_floor: "deck_height - 0.050"
+  t_flight: "sqrt(2 * drop_to_floor / g)"
+  lateral_at_landing: "eject_speed * t_flight"
+  along_at_landing: "belt_speed * t_flight"
+  cage_center_offset: "loop_width_y / 2 + cage_width / 2 + 0.100"
+  eject_window: "carrier_len / belt_speed"
+
+# --------------------------------------------------------------------- фреймы
+# Единственное место, где решаются оси и позы. Всё наследуется от station.
+frames:
+  station:
+    parent: null
+    translate: [0, 0, 0]
+    note: "начало станции; +X — направление движения, +Z — вверх"
+  infeed:
+    parent: station
+    translate: ["=0", 0, "=infeed_height"]
+    note: "точка A: приём с подающего конвейера"
+  ramp:
+    parent: infeed
+    translate: [0.4, 0, 0]
+    rotate_xyz: [0, "=-ramp_angle", 0]
+    note: "участок подъёма деки"
+  deck:
+    parent: station
+    translate: ["=ramp_run + 0.4", 0, "=deck_height"]
+    note: "рабочая плоскость кареток"
+  loop:
+    parent: station
+    translate: [0, 0, "=deck_height"]
+    note: "фрейм замкнутой трассы карусели"
+  cage_c:
+    parent: station
+    translate: [3.0, "=cage_center_offset", 0]
+    note: "точка C: негабарит"
+  cage_d:
+    parent: station
+    translate: [5.0, "=-cage_center_offset", 0]
+    note: "точка D: доупаковка"
+  sorter_infeed:
+    parent: station
+    translate: [8.4, 0, "=sorter_infeed_height"]
+    note: "точка B: инфид основного сортировщика (фиксирован)"
+  camera_rig:
+    parent: infeed
+    translate: [0, 0, 1.2]
+    rotate_xyz: [180, 0, 0]
+    note: "камера над накопителем"
+
+# ---------------------------------------------------------------------- пути
+paths:
+  carousel:
+    frame: loop
+    closed: true
+    points:
+      - [0.0, "=-loop_width_y / 2", 0]
+      - ["=loop_length_x", "=-loop_width_y / 2", 0]
+      - ["=loop_length_x", "=loop_width_y / 2", 0]
+      - [0.0, "=loop_width_y / 2", 0]
+
+# --------------------------------------------------------------------- детали
+parts:
+  floor:
+    frame: station
+    kind: plane
+    size: {x: 12.0, y: 8.0}
+    physics: static
+    tags: [environment]
+
+  infeed_belt:
+    frame: infeed
+    kind: box
+    size: {x: 2.0, y: 0.5, z: 0.05}
+    offset: [-1.0, 0, -0.025]
+    physics: static
+    tags: [conveyor]
+
+  carrier_deck:
+    frame: loop
+    kind: box
+    size: {x: "=carrier_len", y: "=carrier_width", z: 0.030}
+    instances: 20
+    array_along_path: carousel
+    physics: kinematic
+    mass: 6.0
+    tags: [carrier]
+    note: "каретка кроссбелта; поперечная лента моделируется джойнтом cross_belt_drive"
+
+  carrier_wall_front:
+    frame: loop
+    kind: box
+    size: {x: "=wall_thickness", y: "=carrier_width", z: "=wall_height"}
+    offset: ["=carrier_len / 2", 0, "=wall_height / 2"]
+    instances: 20
+    array_along_path: carousel
+    physics: kinematic
+    tags: [carrier, wall]
+
+  carrier_wall_back:
+    frame: loop
+    kind: box
+    size: {x: "=wall_thickness", y: "=carrier_width", z: "=wall_height"}
+    offset: ["=-carrier_len / 2", 0, "=wall_height / 2"]
+    instances: 20
+    array_along_path: carousel
+    physics: kinematic
+    tags: [carrier, wall]
+
+  cage_c_body:
+    frame: cage_c
+    kind: box
+    size: {x: "=cage_len", y: "=cage_width", z: "=cage_rim_height"}
+    offset: [0, 0, "=cage_rim_height / 2"]
+    physics: static
+    tags: [receiver, zone_c]
+
+  cage_d_body:
+    frame: cage_d
+    kind: box
+    size: {x: "=cage_len", y: "=cage_width", z: "=cage_rim_height"}
+    offset: [0, 0, "=cage_rim_height / 2"]
+    physics: static
+    tags: [receiver, zone_d]
+
+  sorter_infeed_belt:
+    frame: sorter_infeed
+    kind: box
+    size: {x: 1.0, y: 0.5, z: 0.05}
+    offset: [0.5, 0, -0.025]
+    physics: static
+    tags: [receiver, zone_b]
+
+  cam_left:
+    frame: camera_rig
+    kind: camera
+    offset: [0, -0.05, 0]
+    tags: [sensor, stereo]
+
+  cam_right:
+    frame: camera_rig
+    kind: camera
+    offset: [0, 0.05, 0]
+    tags: [sensor, stereo]
+
+# -------------------------------------------------------------------- джойнты
+joints:
+  cross_belt_drive:
+    kind: prismatic
+    parent: carrier_deck
+    child: carrier_wall_front
+    axis: [0, 1, 0]              # поперёк движения — ЭТО и проверяет инвариант ниже
+    limits: [-0.4, 0.4]
+    drive: {target_velocity: 0.0, damping: 1000.0, max_force: 500.0}
+    note: "поперечная лента каретки; ось обязана быть ортогональна ходу"
+
+# ------------------------------------------------------------------ инварианты
+# Замысел конструкции, записанный машинно. Падает — чинить spec, а не инвариант.
+constraints:
+  - kind: height
+    name: "deck above cage rim"
+    frame: deck
+    min: "=cage_rim_height + 0.050"
+    max: 0.960
+
+  - kind: height
+    name: "infeed fixed at 700mm"
+    frame: infeed
+    min: 0.6999
+    max: 0.7001
+
+  - kind: height
+    name: "sorter infeed fixed at 700mm"
+    frame: sorter_infeed
+    min: 0.6999
+    max: 0.7001
+
+  - kind: joint_axis_direction
+    name: "cross belt is lateral"
+    joint: cross_belt_drive
+    expect: lateral
+    tol_deg: 0.5
+    allow_flip: true
+
+  - kind: array_pitch
+    name: "carrier pitch fits max item"
+    part: carrier_deck
+    min_pitch: "=min_pitch"
+
+  - kind: path_closed
+    name: "carousel closes"
+    path: carousel
+
+  - kind: capacity_fits
+    name: "carriers fit on the loop"
+    path: carousel
+    count: "=carrier_count"
+    item_size: "=carrier_len"
+    extra: 0.040
+
+  - kind: no_tipover_on_incline
+    name: "tall item survives the ramp"
+    angle_deg: "=ramp_angle"
+    base: "=worst_item_base"
+    height: "=worst_item_height"
+    margin: 1.5
+
+  - kind: no_slip_on_incline
+    name: "box does not slide back"
+    angle_deg: "=ramp_angle"
+    friction: "=item_friction"
+    margin: 1.2
+
+  - kind: projectile_lands_in
+    name: "ejection lands inside cage"
+    speed: "=eject_speed"
+    drop: "=drop_to_floor"
+    target_min: "=eject_gap + 0.100"
+    target_max: "=eject_gap + cage_width - 0.100"
+    carrier_speed: "=belt_speed"
+
+  - kind: actuator_window
+    name: "cross belt fires before the carrier leaves the station"
+    available_time: "=eject_window"
+    actuator_time: "=actuator_time"
+    margin: 1.5
+
+  - kind: no_interpenetration
+    name: "nothing overlaps at rest"
+    ignore_pairs:
+      - [carrier_deck, carrier_wall_front]
+      - [carrier_deck, carrier_wall_back]
+      - [carrier_wall_front, carrier_wall_back]
+      - [floor, infeed_belt]
+      - [floor, cage_c_body]
+      - [floor, cage_d_body]
+      - [floor, sorter_infeed_belt]
+    ignore_tags: [sensor]
+
+  - kind: inside_workspace
+    name: "everything inside the 6x10m cell"
+    bounds:
+      min: [-2.5, -4.0, -0.1]
+      max: [11.0, 4.0, 2.5]
+    tags: [carrier, receiver, conveyor]
+
+  - kind: expr
+    name: "eject speed is achievable"
+    expression: "eject_speed < 2.5"
+    severity: warn
+
+  - kind: carrier_wall_covers_item
+    name: "wall holds the worst item"
+    item_height: "=worst_item_height"
+    min_ratio: 0.2
+    severity: warn
+
+  - kind: throughput
+    name: "meets 3000 items/h"
+    pitch: "=carrier_pitch"
+    speed: "=belt_speed"
+    min_items_per_hour: 3000
+
+  - kind: cage_reachable_from_deck
+    name: "cage C reachable"
+    cage_part: cage_c_body
+
+# ------------------------------------------------------------- runtime-граф
+# Отдельный от сборки. Ветвление и петля второго круга выражены данными.
+runtime:
+  entry: induct
+  nodes: [induct, perceive, classify, dispatch, recirculate, record]
+  transitions:
+    - {from: induct, to: perceive}
+    - {from: perceive, to: classify}
+    - {from: classify, to: dispatch}
+    - {from: dispatch, to: record, label: "ejected", when_has: [dispatched]}
+    - {from: dispatch, to: recirculate, label: "low confidence", when_missing: [dispatched]}
+    - {from: recirculate, to: perceive, label: "second lap"}
+
+views:
+  pad: 1.2
